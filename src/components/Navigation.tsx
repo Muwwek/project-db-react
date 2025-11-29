@@ -1,3 +1,4 @@
+//src/components/Navigation.tsx
 'use client';
 
 import Link from 'next/link';
@@ -6,6 +7,8 @@ import { usePathname } from 'next/navigation';
 export default function Navigation() {
   const pathname = usePathname();
 
+  // "navItems" data is perfect, we'll keep it as is.
+  // The pastel 'bg' and 'color' are used for the active state.
   const navItems = [
     { href: '/', label: 'ภาพรวม', icon: '📊', color: '#8b5cf6', bg: '#f5f3ff' },
     { href: '/sell', label: 'ขายสินค้า', icon: '🛒', color: '#10b981', bg: '#ecfdf5' },
@@ -45,7 +48,7 @@ export default function Navigation() {
                   <span className="nav-icon">{item.icon}</span>
                   <span className="nav-label">{item.label}</span>
                 </div>
-                {isActive && <div className="active-underline"></div>}
+                {/* We removed the active-underline div for a cleaner "pill" style */}
               </Link>
             );
           })}
@@ -53,9 +56,11 @@ export default function Navigation() {
       </div>
 
       <style jsx>{`
+        /* --- Base & Header --- */
         .navigation {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+          background: #ffffff;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+          border-bottom: 1px solid #e5e7eb; /* Light border for formal look */
           position: sticky;
           top: 0;
           z-index: 1000;
@@ -66,7 +71,7 @@ export default function Navigation() {
           padding: 0 24px;
         }
         .nav-header {
-          padding: 20px 0 16px;
+          padding: 16px 0;
         }
         .nav-logo {
           display: flex;
@@ -74,154 +79,135 @@ export default function Navigation() {
           gap: 16px;
         }
         .logo-icon {
-          font-size: 40px;
-          background: rgba(255, 255, 255, 0.95);
-          width: 64px;
-          height: 64px;
+          font-size: 32px;
+          background: #eef2ff; /* Soft pastel background (from reports) */
+          color: #6366f1;
+          width: 56px;
+          height: 56px;
           display: flex;
           align-items: center;
           justify-content: center;
-          border-radius: 16px;
-          box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
-          border: 3px solid rgba(255, 255, 255, 0.5);
-        }
-        .logo-text {
-          flex: 1;
+          border-radius: 14px;
+          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.04);
+          border: none;
         }
         .nav-title {
-          font-size: 28px;
-          font-weight: 700;
-          color: white;
+          font-size: 24px;
+          font-weight: 600;
+          color: #1f2937; /* Dark text for formality */
           margin: 0;
-          text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-          letter-spacing: -0.5px;
         }
         .nav-subtitle {
           font-size: 14px;
-          color: rgba(255, 255, 255, 0.9);
+          color: #6b7281; /* Medium-gray text */
           margin: 4px 0 0 0;
-          font-weight: 500;
-          letter-spacing: 0.3px;
+          font-weight: 400;
         }
+        
+        /* --- Navigation Items (Tabs) --- */
         .nav-items {
           display: flex;
-          gap: 12px;
-          padding-bottom: 0;
+          gap: 8px; /* Spacing between items */
+          padding-bottom: 12px; /* Space from bottom edge */
           overflow-x: auto;
           scrollbar-width: none;
         }
         .nav-items::-webkit-scrollbar {
           display: none;
         }
+
+        /* --- Individual Nav Item (Link) --- */
         .nav-item {
-          position: relative;
           text-decoration: none;
           white-space: nowrap;
-          border-radius: 14px 14px 0 0;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          background: rgba(255, 255, 255, 0.15);
-          border: 2px solid rgba(255, 255, 255, 0.3);
-          border-bottom: none;
-          padding: 3px 3px 0 3px;
+          border-radius: 12px; /* Rounded corners for the pill */
+          transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
+        
+        /* The "pill" content area */
         .nav-item-content {
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 10px 18px 14px 18px;
-          border-radius: 11px 11px 0 0;
-          background: rgba(255, 255, 255, 0.1);
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          padding: 10px 16px;
+          border-radius: 12px; /* Match the link */
+          transition: background-color 0.3s ease, box-shadow 0.3s ease;
         }
-        .nav-item:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
-          border-color: rgba(255, 255, 255, 0.5);
-        }
-        .nav-item:hover .nav-item-content {
-          background: rgba(255, 255, 255, 0.2);
-        }
-        .nav-item-active {
-          background: white;
-          border-color: white;
-          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
-        }
-        .nav-item-active .nav-item-content {
-          background: var(--item-bg, #f3f4f6);
-        }
-        .nav-item-active:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-        }
-        .active-underline {
-          position: absolute;
-          bottom: 0;
-          left: 0;
-          right: 0;
-          height: 4px;
-          background: var(--item-color, #667eea);
-          animation: slideIn 0.3s ease-out;
-        }
-        @keyframes slideIn {
-          from {
-            transform: scaleX(0);
-          }
-          to {
-            transform: scaleX(1);
-          }
-        }
+        
+        /* --- Inactive State --- */
         .nav-icon {
-          font-size: 22px;
-          display: flex;
-          align-items: center;
-          transition: transform 0.3s ease;
-        }
-        .nav-item:hover .nav-icon {
-          transform: scale(1.15) rotate(5deg);
+          font-size: 20px;
+          color: #6b7281; /* Gray icon */
+          transition: color 0.3s ease, transform 0.3s ease;
         }
         .nav-label {
           font-size: 15px;
-          font-weight: 600;
-          color: rgba(255, 255, 255, 0.95);
+          font-weight: 500;
+          color: #4b5563; /* Darker gray text */
           transition: color 0.3s ease;
         }
+        
+        /* --- Hover State (Inactive) --- */
+        .nav-item:not(.nav-item-active):hover .nav-item-content {
+          background: #f3f4f6; /* Light gray hover */
+        }
+        .nav-item:not(.nav-item-active):hover .nav-label {
+          color: #1f2937;
+        }
+        
+        /* --- Active State --- */
+        .nav-item-active .nav-item-content {
+          background: var(--item-bg, #f3f4f6); /* Pastel background from props */
+          box-shadow: 0 4px 10px -2px rgba(0, 0, 0, 0.06);
+        }
+        .nav-item-active .nav-icon {
+          color: var(--item-color, #374151); /* Pastel text color from props */
+        }
         .nav-item-active .nav-label {
-          color: var(--item-color, #374151);
+          color: var(--item-color, #374151); /* Pastel text color from props */
+          font-weight: 600; /* Bold active label */
+        }
+        
+        /* Subtle hover/active animations */
+        .nav-item:hover {
+          transform: translateY(-1px);
+        }
+        .nav-item-active {
+          pointer-events: none; /* Disable click on active item */
+        }
+        .nav-item-active .nav-icon {
+           transform: scale(1.05);
         }
 
+        /* --- Responsive --- */
         @media (max-width: 768px) {
           .nav-container {
             padding: 0 16px;
           }
           .nav-header {
-            padding: 16px 0 12px;
+            padding: 12px 0 8px;
           }
           .logo-icon {
-            width: 52px;
-            height: 52px;
-            font-size: 30px;
-            border-radius: 14px;
+            width: 48px;
+            height: 48px;
+            font-size: 28px;
+            border-radius: 12px;
           }
           .nav-title {
             font-size: 20px;
           }
           .nav-subtitle {
-            font-size: 12px;
+            font-size: 13px;
           }
           .nav-items {
-            gap: 8px;
-          }
-          .nav-item {
-            padding: 2px 2px 0 2px;
+            gap: 6px;
+            padding-bottom: 10px;
           }
           .nav-item-content {
-            padding: 9px 14px 13px 14px;
-          }
-          .active-underline {
-            height: 3px;
+            padding: 8px 12px;
           }
           .nav-icon {
-            font-size: 20px;
+            font-size: 18px;
           }
           .nav-label {
             font-size: 14px;
@@ -229,24 +215,20 @@ export default function Navigation() {
         }
 
         @media (max-width: 480px) {
-          .nav-title {
-            font-size: 18px;
-          }
           .nav-subtitle {
-            display: none;
+            display: none; /* Hide subtitle on very small screens */
           }
-          .nav-items {
-            gap: 6px;
+          .logo-icon {
+             width: 44px;
+             height: 44px;
+             font-size: 24px;
+          }
+          .nav-title {
+             font-size: 18px;
           }
           .nav-item-content {
-            padding: 8px 12px 12px 12px;
+            padding: 8px 10px;
             gap: 6px;
-          }
-          .nav-icon {
-            font-size: 18px;
-          }
-          .nav-label {
-            font-size: 13px;
           }
         }
       `}</style>

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { StockMovementSummary, StockMovementHistory } from '../../types/inventory';
 import Navigation from '../../components/Navigation';
+import '../../styles/stock.css';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:5001/api';
 
@@ -27,7 +28,27 @@ export default function StockPage() {
         axios.get('/stock-movements/summary'),
         axios.get('/stock-movements/history')
       ]);
-      setSummary(summaryRes.data || []);
+      
+      // เรียงลำดับ summary ตามสถานะสต็อก: หมด → ใกล้หมด → ปกติ
+      const sortedSummary = (summaryRes.data || []).sort((a: StockMovementSummary, b: StockMovementSummary) => {
+        const stockA = a.NetStock || a.StockQuantity || 0;
+        const stockB = b.NetStock || b.StockQuantity || 0;
+        const minStockA = a.MinStockLevel || 0;
+        const minStockB = b.MinStockLevel || 0;
+        
+        // 1. สินค้าหมดสต็อก (stock = 0) - มาก่อน
+        if (stockA === 0 && stockB !== 0) return -1;
+        if (stockA !== 0 && stockB === 0) return 1;
+        
+        // 2. สินค้าใกล้หมด (stock <= minStock) - มาถัดไป
+        if (stockA <= minStockA && stockB > minStockB) return -1;
+        if (stockA > minStockA && stockB <= minStockB) return 1;
+        
+        // 3. เรียงตามจำนวนสต็อก (น้อยไปมาก)
+        return stockA - stockB;
+      });
+      
+      setSummary(sortedSummary);
       setHistory(historyRes.data || []);
     } catch (err) {
       console.error('Error fetching stock data:', err);
@@ -49,9 +70,27 @@ export default function StockPage() {
     return type === 'IN' ? '📥' : '📤';
   };
 
+  const getStockStatus = (item: StockMovementSummary) => {
+    const stock = item.NetStock || item.StockQuantity || 0;
+    const minStock = item.MinStockLevel || 0;
+    
+    if (stock === 0) return 'out-of-stock';
+    if (stock <= minStock) return 'low-stock';
+    return 'in-stock';
+  };
+
+  const getStockStatusText = (item: StockMovementSummary) => {
+    const stock = item.NetStock || item.StockQuantity || 0;
+    const minStock = item.MinStockLevel || 0;
+    
+    if (stock === 0) return '🔴 หมด';
+    if (stock <= minStock) return '🟡 ใกล้หมด';
+    return '🟢 ปกติ';
+  };
+
   if (loading) {
     return (
-      <div className="app-container">
+      <div className="stock-container">
         <Navigation />
         <div className="loading-container">
           <div className="loading-spinner"></div>
@@ -62,12 +101,12 @@ export default function StockPage() {
   }
 
   return (
-    <div className="app-container">
+    <div className="stock-container">
       <Navigation />
       
       <main className="app-main">
-        <div className="container">
-          <div className="page-header">
+        <div className="stock-content">
+          <div className="stock-header">
             <div className="header-icon">📈</div>
             <h1>การเคลื่อนไหวสต็อก</h1>
             <p>ติดตามการรับเข้าและจ่ายออกสินค้า</p>
@@ -77,23 +116,25 @@ export default function StockPage() {
             <div className="alert alert-error">
               <span className="alert-icon">⚠️</span>
               <span className="alert-message">{error}</span>
-              <button onClick={fetchStockData} className="btn btn-sm btn-retry">ลองอีกครั้ง</button>
+              <button onClick={fetchStockData} className="stock-btn stock-btn-sm stock-btn-retry">
+                ลองอีกครั้ง
+              </button>
             </div>
           )}
 
-          <div className="tabs">
+          <div className="stock-tabs">
             <button 
-              className={`tab ${activeTab === 'summary' ? 'tab-active' : ''}`}
+              className={`stock-tab ${activeTab === 'summary' ? 'stock-tab-active' : ''}`}
               onClick={() => setActiveTab('summary')}
             >
-              <span className="tab-icon">📊</span>
+              <span className="stock-tab-icon">📊</span>
               <span>สรุปสต็อก</span>
             </button>
             <button 
-              className={`tab ${activeTab === 'history' ? 'tab-active' : ''}`}
+              className={`stock-tab ${activeTab === 'history' ? 'stock-tab-active' : ''}`}
               onClick={() => setActiveTab('history')}
             >
-              <span className="tab-icon">📋</span>
+              <span className="stock-tab-icon">📋</span>
               <span>ประวัติการเคลื่อนไหว</span>
             </button>
           </div>
@@ -152,20 +193,20 @@ export default function StockPage() {
                 </div>
               </div>
 
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">
+              <div className="stock-card">
+                <div className="stock-card-header">
+                  <div className="stock-card-title">
                     <h2>สรุปการเคลื่อนไหวสต็อก</h2>
-                    <p className="card-subtitle">ภาพรวมการรับเข้าและจ่ายออกสินค้า</p>
+                    <p className="stock-card-subtitle">ภาพรวมการรับเข้าและจ่ายออกสินค้า (เรียงตามสถานะสต็อก)</p>
                   </div>
-                  <button onClick={fetchStockData} className="btn btn-primary">
-                    <span className="btn-icon">🔄</span>
+                  <button onClick={fetchStockData} className="stock-btn stock-btn-primary">
+                    <span className="stock-btn-icon">🔄</span>
                     <span>อัพเดต</span>
                   </button>
                 </div>
 
                 <div className="table-container">
-                  <table className="table">
+                  <table className="stock-table">
                     <thead>
                       <tr>
                         <th>สินค้า</th>
@@ -199,17 +240,13 @@ export default function StockPage() {
                             <span className="out-number">{item.TotalOut?.toLocaleString()}</span>
                           </td>
                           <td className="text-center">
-                            <span className={`net-number ${(item.NetStock || 0) <= (item.MinStockLevel || 0) ? 'low' : ''}`}>
+                            <span className={`net-number ${getStockStatus(item) === 'low-stock' ? 'low' : ''}`}>
                               {item.NetStock?.toLocaleString() || item.StockQuantity?.toLocaleString()}
                             </span>
                           </td>
                           <td className="text-center">
-                            <span className={`status-badge ${
-                              (item.NetStock || item.StockQuantity || 0) === 0 ? 'out-of-stock' :
-                              (item.NetStock || item.StockQuantity || 0) <= (item.MinStockLevel || 0) ? 'low-stock' : 'in-stock'
-                            }`}>
-                              {(item.NetStock || item.StockQuantity || 0) === 0 ? '🔴 หมด' :
-                              (item.NetStock || item.StockQuantity || 0) <= (item.MinStockLevel || 0) ? '🟡 ใกล้หมด' : '🟢 ปกติ'}
+                            <span className={`stock-status-badge ${getStockStatus(item)}`}>
+                              {getStockStatusText(item)}
                             </span>
                           </td>
                         </tr>
@@ -230,20 +267,20 @@ export default function StockPage() {
           )}
 
           {activeTab === 'history' && (
-            <div className="card">
-              <div className="card-header">
-                <div className="card-title">
+            <div className="stock-card">
+              <div className="stock-card-header">
+                <div className="stock-card-title">
                   <h2>ประวัติการเคลื่อนไหวสต็อก</h2>
-                  <p className="card-subtitle">บันทึกการรับเข้าและจ่ายออกสินค้า</p>
+                  <p className="stock-card-subtitle">บันทึกการรับเข้าและจ่ายออกสินค้า</p>
                 </div>
-                <button onClick={fetchStockData} className="btn btn-primary">
-                  <span className="btn-icon">🔄</span>
+                <button onClick={fetchStockData} className="stock-btn stock-btn-primary">
+                  <span className="stock-btn-icon">🔄</span>
                   <span>อัพเดต</span>
                 </button>
               </div>
 
               <div className="table-container">
-                <table className="table">
+                <table className="stock-table">
                   <thead>
                     <tr>
                       <th>วันที่</th>
@@ -315,628 +352,6 @@ export default function StockPage() {
           )}
         </div>
       </main>
-
-      <style jsx>{`
-        .app-container {
-          min-height: 100vh;
-          background: linear-gradient(135deg, #fef3f0 0%, #f0f9ff 50%, #faf5ff 100%);
-        }
-
-        .loading-container {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          min-height: 60vh;
-        }
-
-        .loading-spinner {
-          width: 50px;
-          height: 50px;
-          border: 4px solid #f3e8ff;
-          border-top: 4px solid #a78bfa;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-
-        .loading-text {
-          margin-top: 16px;
-          color: #6b7280;
-          font-size: 16px;
-        }
-
-        .container {
-          max-width: 1400px;
-          margin: 0 auto;
-          padding: 32px 20px;
-        }
-
-        .page-header {
-          text-align: center;
-          margin-bottom: 40px;
-          animation: fadeInDown 0.5s ease;
-        }
-
-        @keyframes fadeInDown {
-          from {
-            opacity: 0;
-            transform: translateY(-20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        .header-icon {
-          font-size: 56px;
-          margin-bottom: 12px;
-          filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
-        }
-
-        .page-header h1 {
-          font-size: 36px;
-          font-weight: 700;
-          background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          margin: 0 0 8px 0;
-        }
-
-        .page-header p {
-          color: #6b7280;
-          font-size: 16px;
-          margin: 0;
-        }
-
-        .alert-error {
-          background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-          border: 2px solid #fca5a5;
-          border-radius: 16px;
-          padding: 16px 20px;
-          margin-bottom: 24px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          box-shadow: 0 4px 12px rgba(239, 68, 68, 0.15);
-        }
-
-        .alert-icon {
-          font-size: 24px;
-        }
-
-        .alert-message {
-          flex: 1;
-          color: #991b1b;
-          font-weight: 500;
-        }
-
-        .tabs {
-          display: flex;
-          background: white;
-          padding: 8px;
-          border-radius: 16px;
-          margin-bottom: 32px;
-          border: 2px solid #e5e7eb;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-          gap: 8px;
-        }
-
-        .tab {
-          flex: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          padding: 14px 24px;
-          border-radius: 12px;
-          font-weight: 600;
-          font-size: 15px;
-          color: #6b7280;
-          background: transparent;
-          border: none;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .tab-icon {
-          font-size: 20px;
-        }
-
-        .tab:hover:not(.tab-active) {
-          background: #f9fafb;
-          color: #374151;
-        }
-
-        .tab-active {
-          background: linear-gradient(135deg, #a78bfa 0%, #818cf8 100%);
-          color: white;
-          box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
-        }
-
-        .stats-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-          gap: 20px;
-          margin-bottom: 32px;
-          animation: fadeInUp 0.5s ease;
-        }
-
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        .stat-card {
-          background: white;
-          border-radius: 20px;
-          padding: 24px;
-          display: flex;
-          align-items: center;
-          gap: 20px;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
-          transition: all 0.3s ease;
-          border: 2px solid transparent;
-        }
-
-        .stat-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-        }
-
-        .stat-card-blue {
-          background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-          border-color: #93c5fd;
-        }
-
-        .stat-card-purple {
-          background: linear-gradient(135deg, #e9d5ff 0%, #d8b4fe 100%);
-          border-color: #c084fc;
-        }
-
-        .stat-card-green {
-          background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
-          border-color: #6ee7b7;
-        }
-
-        .stat-card-orange {
-          background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
-          border-color: #fb923c;
-        }
-
-        .stat-icon-container {
-          width: 70px;
-          height: 70px;
-          background: white;
-          border-radius: 16px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-        }
-
-        .stat-icon {
-          font-size: 36px;
-        }
-
-        .stat-content {
-          flex: 1;
-        }
-
-        .stat-label {
-          font-size: 14px;
-          font-weight: 600;
-          color: #4b5563;
-          margin-bottom: 6px;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-
-        .stat-value {
-          font-size: 32px;
-          font-weight: 800;
-          color: #111827;
-          line-height: 1;
-        }
-
-        .stat-unit {
-          font-size: 13px;
-          color: #6b7280;
-          margin-top: 4px;
-          font-weight: 500;
-        }
-
-        .card {
-          background: white;
-          border-radius: 20px;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
-          margin-bottom: 32px;
-          border: 2px solid #e5e7eb;
-          overflow: hidden;
-        }
-
-        .card-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 28px 32px;
-          background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
-          border-bottom: 2px solid #e9d5ff;
-        }
-
-        .card-title h2 {
-          margin: 0 0 4px 0;
-          font-size: 24px;
-          font-weight: 700;
-          color: #581c87;
-        }
-
-        .card-subtitle {
-          margin: 0;
-          font-size: 14px;
-          color: #7c3aed;
-          font-weight: 500;
-        }
-
-        .btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          border: none;
-          border-radius: 12px;
-          padding: 12px 24px;
-          font-weight: 600;
-          font-size: 14px;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        }
-
-        .btn-primary {
-          background: linear-gradient(135deg, #a78bfa 0%, #818cf8 100%);
-          color: white;
-        }
-
-        .btn-primary:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4);
-        }
-
-        .btn-retry {
-          background: #fee2e2;
-          color: #991b1b;
-        }
-
-        .btn-retry:hover {
-          background: #fecaca;
-        }
-
-        .btn-sm {
-          padding: 8px 16px;
-          font-size: 13px;
-        }
-
-        .btn-icon {
-          font-size: 16px;
-        }
-
-        .table-container {
-          overflow-x: auto;
-          padding: 0;
-        }
-
-        .table {
-          width: 100%;
-          border-collapse: separate;
-          border-spacing: 0;
-        }
-
-        .table thead tr {
-          background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-        }
-
-        .table th {
-          padding: 16px 20px;
-          text-align: left;
-          color: #0c4a6e;
-          font-weight: 700;
-          font-size: 14px;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          border-bottom: 2px solid #bae6fd;
-          white-space: nowrap;
-        }
-
-        .table th:first-child {
-          border-top-left-radius: 0;
-        }
-
-        .table th:last-child {
-          border-top-right-radius: 0;
-        }
-
-        .table td {
-          padding: 16px 20px;
-          color: #374151;
-          font-size: 14px;
-          border-bottom: 1px solid #f3f4f6;
-        }
-
-        .table-row-hover {
-          transition: all 0.2s ease;
-        }
-
-        .table-row-hover:hover {
-          background: linear-gradient(135deg, #fef3f0 0%, #faf5ff 100%);
-        }
-
-        .text-center {
-          text-align: center;
-        }
-
-        .product-cell {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .product-icon {
-          font-size: 20px;
-        }
-
-        .product-name {
-          font-weight: 600;
-          color: #111827;
-        }
-
-        .category-badge {
-          display: inline-block;
-          background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-          color: #1e40af;
-          padding: 6px 14px;
-          border-radius: 12px;
-          font-size: 13px;
-          font-weight: 600;
-          border: 1px solid #93c5fd;
-        }
-
-        .stock-number {
-          font-weight: 600;
-          color: #4b5563;
-          padding: 4px 12px;
-          background: #f3f4f6;
-          border-radius: 8px;
-          display: inline-block;
-        }
-
-        .in-number {
-          font-weight: 700;
-          color: #059669;
-          padding: 4px 12px;
-          background: #d1fae5;
-          border-radius: 8px;
-          display: inline-block;
-        }
-
-        .out-number {
-          font-weight: 700;
-          color: #dc2626;
-          padding: 4px 12px;
-          background: #fee2e2;
-          border-radius: 8px;
-          display: inline-block;
-        }
-
-        .net-number {
-          font-weight: 700;
-          color: #2563eb;
-          padding: 4px 12px;
-          background: #dbeafe;
-          border-radius: 8px;
-          display: inline-block;
-        }
-
-        .net-number.low {
-          color: #d97706;
-          background: #fed7aa;
-        }
-
-        .status-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          padding: 6px 14px;
-          border-radius: 12px;
-          font-size: 13px;
-          font-weight: 700;
-          border: 2px solid;
-        }
-
-        .status-badge.in-stock {
-          background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
-          color: #065f46;
-          border-color: #6ee7b7;
-        }
-
-        .status-badge.low-stock {
-          background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-          color: #92400e;
-          border-color: #fbbf24;
-        }
-
-        .status-badge.out-of-stock {
-          background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-          color: #991b1b;
-          border-color: #f87171;
-        }
-
-        .movement-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 6px 14px;
-          border-radius: 12px;
-          font-size: 13px;
-          font-weight: 700;
-          border: 2px solid;
-        }
-
-        .movement-badge.movement-in {
-          background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
-          color: #065f46;
-          border-color: #6ee7b7;
-        }
-
-        .movement-badge.movement-out {
-          background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-          color: #991b1b;
-          border-color: #f87171;
-        }
-
-        .date-cell {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-        }
-
-        .time-text {
-          font-size: 12px;
-          color: #9ca3af;
-          font-weight: 500;
-        }
-
-        .notes-text {
-          color: #6b7280;
-          font-size: 13px;
-        }
-
-        .empty-state {
-          text-align: center;
-          padding: 60px 20px;
-        }
-
-        .empty-icon {
-          font-size: 64px;
-          margin-bottom: 16px;
-          opacity: 0.6;
-        }
-
-        .empty-text {
-          font-size: 18px;
-          font-weight: 600;
-          color: #4b5563;
-          margin: 0 0 8px 0;
-        }
-
-        .empty-subtext {
-          font-size: 14px;
-          color: #9ca3af;
-          margin: 0;
-        }
-
-        @media (max-width: 1024px) {
-          .stats-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-        }
-
-        @media (max-width: 768px) {
-          .container {
-            padding: 20px 16px;
-          }
-
-          .page-header h1 {
-            font-size: 28px;
-          }
-
-          .header-icon {
-            font-size: 48px;
-          }
-
-          .tabs {
-            flex-direction: column;
-            gap: 8px;
-          }
-
-          .tab {
-            padding: 12px 16px;
-          }
-
-          .stats-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .stat-card {
-            padding: 20px;
-          }
-
-          .stat-icon-container {
-            width: 60px;
-            height: 60px;
-          }
-
-          .stat-icon {
-            font-size: 30px;
-          }
-
-          .stat-value {
-            font-size: 26px;
-          }
-
-          .card-header {
-            flex-direction: column;
-            gap: 16px;
-            align-items: flex-start;
-            padding: 20px;
-          }
-
-          .table-container {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-          }
-
-          .table {
-            min-width: 800px;
-          }
-
-          .table th,
-          .table td {
-            padding: 12px 16px;
-            font-size: 13px;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .page-header h1 {
-            font-size: 24px;
-          }
-
-          .stat-value {
-            font-size: 22px;
-          }
-
-          .card-title h2 {
-            font-size: 20px;
-          }
-
-          .btn {
-            width: 100%;
-            justify-content: center;
-          }
-        }
-      `}</style>
     </div>
   );
 }

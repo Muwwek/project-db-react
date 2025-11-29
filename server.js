@@ -79,31 +79,62 @@ app.get('/api/db-test', async (req, res) => {
   }
 });
 
-// Products endpoints
+// Products endpoints - แก้ไขให้รองรับการค้นหา
 app.get('/api/products', async (req, res) => {
   try {
-    const result = await pool.request()
-      .query(`
-        SELECT 
-          p.ProductID,
-          p.ProductName,
-          p.Description,
-          p.CategoryID,
-          c.CategoryName,
-          p.Price,
-          p.StockQuantity,
-          p.ReorderLevel,
-          p.IsActive,
-          p.CreatedDate
-        FROM Products p 
-        INNER JOIN Categories c ON p.CategoryID = c.CategoryID 
-        WHERE p.IsActive = 1
-        ORDER BY p.ProductName
-      `);
+    const { q, category } = req.query;
+    
+    console.log('Fetching products with params:', { q, category });
+    
+    let query = `
+      SELECT 
+        p.ProductID,
+        p.ProductName,
+        p.Description,
+        p.CategoryID,
+        c.CategoryName,
+        p.Price,
+        p.StockQuantity,
+        p.ReorderLevel,
+        p.IsActive,
+        p.CreatedDate
+      FROM Products p 
+      INNER JOIN Categories c ON p.CategoryID = c.CategoryID 
+      WHERE p.IsActive = 1
+    `;
+    
+    const request = pool.request();
+    
+    // Handle search query
+    if (q && q.trim() !== '') {
+      query += ' AND (p.ProductName LIKE @search OR p.Description LIKE @search)';
+      request.input('search', sql.NVarChar, `%${q.trim()}%`);
+    }
+    
+    // Handle category filter
+    if (category && category !== 'all') {
+      const categoryId = parseInt(category);
+      if (!isNaN(categoryId) && categoryId > 0) {
+        query += ' AND c.CategoryID = @categoryId';
+        request.input('categoryId', sql.Int, categoryId);
+      }
+    }
+    
+    query += ' ORDER BY p.ProductName';
+    
+    console.log('Executing query:', query);
+    
+    const result = await request.query(query);
+    
+    console.log(`Found ${result.recordset.length} products`);
+    
     res.json(result.recordset);
   } catch (err) {
     console.error('Error fetching products:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ 
+      error: err.message,
+      message: 'เกิดข้อผิดพลาดในการโหลดข้อมูลสินค้า'
+    });
   }
 });
 
@@ -519,6 +550,251 @@ app.get('/api/revenue/summary', async (req, res) => {
   }
 });
 
+// Add new product endpoint
+app.post('/api/products', async (req, res) => {
+  const transaction = new sql.Transaction(pool);
+  
+  try {
+    await transaction.begin();
+    
+    const {
+      productName,
+      description,
+      categoryId,
+      price,
+      stockQuantity,
+      reorderLevel
+    } = req.body;
+
+    // Validate required fields
+    if (!productName || !categoryId || price === undefined) {
+      await transaction.rollback();
+      return res.status(400).json({ 
+        error: 'กรุณากรอกข้อมูลให้ครบถ้วน (ชื่อสินค้า, หมวดหมู่, ราคา)' 
+      });
+    }
+
+    // Check if product name already exists
+    const existingProduct = await transaction.request()
+      .input('productName', sql.NVarChar, productName)
+      .query('SELECT ProductID FROM Products WHERE ProductName = @productName AND IsActive = 1');
+    
+    if (existingProduct.recordset.length > 0) {
+      await transaction.rollback();
+      return res.status(400).json({ 
+        error: 'มีชื่อสินค้านี้อยู่ในระบบแล้ว' 
+      });
+    }
+
+    // Insert new product
+    const result = await transaction.request()
+      .input('productName', sql.NVarChar, productName)
+      .input('description', sql.NVarChar, description || '')
+      .input('categoryId', sql.Int, categoryId)
+      .input('price', sql.Decimal(10,2), price)
+      .input('stockQuantity', sql.Int, stockQuantity || 0)
+      .input('reorderLevel', sql.Int, reorderLevel || 0)
+      .query(`
+        INSERT INTO Products (ProductName, Description, CategoryID, Price, StockQuantity, ReorderLevel, IsActive, CreatedDate)
+        OUTPUT INSERTED.ProductID
+        VALUES (@productName, @description, @categoryId, @price, @stockQuantity, @reorderLevel, 1, GETDATE())
+      `);
+
+    const productId = result.recordset[0].ProductId;
+
+    // If initial stock is provided, record stock movement
+    if (stockQuantity && stockQuantity > 0) {
+      await transaction.request()
+        .input('productId', sql.Int, productId)
+        .input('quantity', sql.Int, stockQuantity)
+        .input('movementType', sql.NVarChar, 'IN')
+        .input('previousStock', sql.Int, 0)
+        .input('newStock', sql.Int, stockQuantity)
+        .input('notes', sql.NVarChar, 'สต็อกเริ่มต้น')
+        .query(`
+          INSERT INTO StockMovements (ProductID, MovementType, Quantity, PreviousStock, NewStock, Notes, MovementDate)
+          VALUES (@productId, @movementType, @quantity, @previousStock, @newStock, @notes, GETDATE())
+        `);
+    }
+
+    await transaction.commit();
+
+    res.status(201).json({ 
+      success: true, 
+      message: `เพิ่มสินค้า "${productName}" เรียบร้อยแล้ว`,
+      productId: productId
+    });
+  } catch (err) {
+    await transaction.rollback();
+    console.error('Error adding product:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update product endpoint
+app.put('/api/products/:id', async (req, res) => {
+  try {
+    const productId = req.params.id;
+    const {
+      productName,
+      description,
+      categoryId,
+      price,
+      reorderLevel,
+      isActive
+    } = req.body;
+
+    // Check if product exists
+    const existingProduct = await pool.request()
+      .input('productId', sql.Int, productId)
+      .query('SELECT ProductID FROM Products WHERE ProductID = @productId');
+    
+    if (existingProduct.recordset.length === 0) {
+      return res.status(404).json({ error: 'ไม่พบสินค้าที่ต้องการแก้ไข' });
+    }
+
+    // Check if new product name conflicts with other products
+    const nameConflict = await pool.request()
+      .input('productId', sql.Int, productId)
+      .input('productName', sql.NVarChar, productName)
+      .query('SELECT ProductID FROM Products WHERE ProductName = @productName AND ProductID != @productId AND IsActive = 1');
+    
+    if (nameConflict.recordset.length > 0) {
+      return res.status(400).json({ error: 'มีชื่อสินค้านี้อยู่ในระบบแล้ว' });
+    }
+
+    // Update product
+    await pool.request()
+      .input('productId', sql.Int, productId)
+      .input('productName', sql.NVarChar, productName)
+      .input('description', sql.NVarChar, description || '')
+      .input('categoryId', sql.Int, categoryId)
+      .input('price', sql.Decimal(10,2), price)
+      .input('reorderLevel', sql.Int, reorderLevel || 0)
+      .input('isActive', sql.Bit, isActive !== undefined ? isActive : 1)
+      .query(`
+        UPDATE Products 
+        SET ProductName = @productName,
+            Description = @description,
+            CategoryID = @categoryId,
+            Price = @price,
+            ReorderLevel = @reorderLevel,
+            IsActive = @isActive
+        WHERE ProductID = @productId
+      `);
+
+    res.json({ 
+      success: true, 
+      message: `อัปเดตสินค้าเรียบร้อยแล้ว`
+    });
+  } catch (err) {
+    console.error('Error updating product:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete product (soft delete) endpoint
+app.delete('/api/products/:id', async (req, res) => {
+  try {
+    const productId = req.params.id;
+
+    // Check if product exists
+    const existingProduct = await pool.request()
+      .input('productId', sql.Int, productId)
+      .query('SELECT ProductName FROM Products WHERE ProductID = @productId AND IsActive = 1');
+    
+    if (existingProduct.recordset.length === 0) {
+      return res.status(404).json({ error: 'ไม่พบสินค้าที่ต้องการลบ' });
+    }
+
+    // Check if product has stock or order history
+    const stockCheck = await pool.request()
+      .input('productId', sql.Int, productId)
+      .query(`
+        SELECT 
+          (SELECT COUNT(*) FROM OrderItems WHERE ProductID = @productId) as OrderCount,
+          (SELECT StockQuantity FROM Products WHERE ProductID = @productId) as StockQuantity
+      `);
+
+    const orderCount = stockCheck.recordset[0].OrderCount;
+    const stockQuantity = stockCheck.recordset[0].StockQuantity;
+
+    if (orderCount > 0 || stockQuantity > 0) {
+      return res.status(400).json({ 
+        error: 'ไม่สามารถลบสินค้าได้ เนื่องจากมีประวัติการขายหรือมีสต็อกคงเหลือ',
+        orderCount: orderCount,
+        stockQuantity: stockQuantity
+      });
+    }
+
+    // Soft delete product
+    await pool.request()
+      .input('productId', sql.Int, productId)
+      .query('UPDATE Products SET IsActive = 0 WHERE ProductID = @productId');
+
+    res.json({ 
+      success: true, 
+      message: `ลบสินค้า "${existingProduct.recordset[0].ProductName}" เรียบร้อยแล้ว`
+    });
+  } catch (err) {
+    console.error('Error deleting product:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ใน endpoint ที่ใช้ productId ให้เพิ่ม validation
+app.get('/api/products/:id', async (req, res) => {
+  try {
+    const productId = parseInt(req.params.id);
+    
+    // ตรวจสอบว่า productId เป็นตัวเลขที่ถูกต้อง
+    if (isNaN(productId)) {
+      return res.status(400).json({ 
+        error: 'รหัสสินค้าไม่ถูกต้อง',
+        message: 'กรุณาระบุรหัสสินค้าให้ถูกต้อง'
+      });
+    }
+    
+    const result = await pool.request()
+      .input('productId', sql.Int, productId)
+      .query(`
+        SELECT 
+          p.ProductID,
+          p.ProductName,
+          p.Description,
+          p.CategoryID,
+          c.CategoryName,
+          p.Price,
+          p.StockQuantity,
+          p.ReorderLevel,
+          p.IsActive,
+          p.CreatedDate
+        FROM Products p 
+        INNER JOIN Categories c ON p.CategoryID = c.CategoryID 
+        WHERE p.ProductID = @productId
+      `);
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ 
+        error: 'ไม่พบสินค้า',
+        message: 'ไม่พบสินค้าที่ระบุ'
+      });
+    }
+
+    res.json(result.recordset[0]);
+  } catch (err) {
+    console.error('Error fetching product:', err);
+    res.status(500).json({ 
+      error: err.message,
+      message: 'เกิดข้อผิดพลาดในการโหลดข้อมูลสินค้า'
+    });
+  }
+});
+
+// Search products endpoint - แก้ไขให้มีความทนทาน
+
+
+
 // Top selling products endpoint
 app.get('/api/revenue/top-products', async (req, res) => {
   try {
@@ -573,6 +849,10 @@ async function startServer() {
     console.log(`⚠️  Low Stock API: http://localhost:${PORT}/api/products/low-stock`);
     console.log(`📊 Stock Summary API: http://localhost:${PORT}/api/stock-movements/summary`);
     console.log(`📈 Stock History API: http://localhost:${PORT}/api/stock-movements/history`);
+    console.log(`➕ Add Product API: http://localhost:${PORT}/api/products (POST)`);
+    console.log(`✏️ Edit Product API: http://localhost:${PORT}/api/products/:id (PUT)`);
+    console.log(`🗑️ Delete Product API: http://localhost:${PORT}/api/products/:id (DELETE)`);
+    console.log(`🔍 Get Product API: http://localhost:${PORT}/api/products/:id (GET)`);
   });
 }
 

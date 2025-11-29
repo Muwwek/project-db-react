@@ -93,3 +93,55 @@ export interface CartItem {
   quantity: number;
   stock: number;
 }
+
+// เพิ่ม interface ใหม่สำหรับการค้นหาและฟอร์ม
+export interface ProductSearchParams {
+  q?: string;
+  category?: string;
+}
+
+export interface ProductFormData {
+  productName: string;
+  description: string;
+  categoryId: string;
+  price: string;
+  stockQuantity: string;
+  reorderLevel: string;
+}
+
+export interface Category {
+  CategoryID: number;
+  CategoryName: string;
+  Description?: string;
+  IsActive: boolean;
+  CreatedDate?: string;
+}
+
+// เพิ่ม interface สำหรับรายละเอียดสินค้า
+export interface ProductDetails extends Product {
+  StockMovements?: StockMovementHistory[];
+  TotalSold?: number;
+  LastRestocked?: string;
+}
+
+export interface ProductSearchParams {
+  q?: string;
+  category?: string;
+}
+
+export interface ProductFormData {
+  productName: string;
+  description: string;
+  categoryId: string;
+  price: string;
+  stockQuantity: string;
+  reorderLevel: string;
+}
+
+export interface Category {
+  CategoryID: number;
+  CategoryName: string;
+  Description?: string;
+  IsActive: boolean;
+  CreatedDate?: string;
+}

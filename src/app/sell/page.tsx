@@ -787,7 +787,7 @@ export default function SellPage() {
         .total-amount {
           font-size: 28px;
           font-weight: 700;
-          background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 50%, #a8e6cf 100%);
+          background: #03045e;
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;

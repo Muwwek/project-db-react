@@ -1,53 +1,151 @@
+// src/app/products/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Product } from '../../types/inventory';
+import { Product, ProductSearchParams, ProductFormData, Category, ProductDetails } from '../../types/inventory';
 import Navigation from '../../components/Navigation';
+import '../../styles/products.css';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:5001/api';
 
-axios.defaults.baseURL = API_BASE;
+// สร้าง axios instance
+const api = axios.create({
+  baseURL: API_BASE,
+  timeout: 10000,
+});
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<ProductDetails | null>(null);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [formLoading, setFormLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [formData, setFormData] = useState<ProductFormData>({
+    productName: '',
+    description: '',
+    categoryId: '',
+    price: '',
+    stockQuantity: '0',
+    reorderLevel: '0'
+  });
 
   useEffect(() => {
     fetchProducts();
+    fetchCategories();
   }, []);
 
-  const fetchProducts = async () => {
+  // แก้ไข fetchProducts ให้ใช้ endpoint เดียว
+  const fetchProducts = async (searchParams?: ProductSearchParams) => {
     try {
       setLoading(true);
-      const response = await axios.get('/products');
+      setError(null);
+      
+      // ใช้ endpoint เดียวสำหรับทั้งโหลดข้อมูลและค้นหา
+      let url = '/products';
+      let params: any = {};
+      
+      // เพิ่ม parameter การค้นหาถ้ามี
+      if (searchParams) {
+        if (searchParams.q && searchParams.q.trim() !== '') {
+          params.q = searchParams.q.trim();
+        }
+        if (searchParams.category && searchParams.category !== 'all') {
+          params.category = searchParams.category;
+        }
+      }
+      
+      const response = await api.get(url, { params });
       setProducts(response.data || []);
-    } catch (err) {
+      
+    } catch (err: any) {
       console.error('Error fetching products:', err);
-      setError('ไม่สามารถโหลดข้อมูลสินค้าได้');
+      const errorMessage = err.response?.data?.message || err.response?.data?.error || 'ไม่สามารถโหลดข้อมูลสินค้าได้';
+      setError(errorMessage);
+      
+      // ถ้าโหลดข้อมูลล้มเหลว ให้ลองโหลดใหม่โดยไม่ใช้ parameter
+      if (Object.keys(params).length > 0) {
+        console.log('Loading failed with params, trying without params...');
+        try {
+          const fallbackResponse = await api.get('/products');
+          setProducts(fallbackResponse.data || []);
+          setError(`การค้นหาล้มเหลว: ${errorMessage} (แสดงข้อมูลทั้งหมดแทน)`);
+        } catch (fallbackError: any) {
+          console.error('Fallback also failed:', fallbackError);
+          setError('ไม่สามารถโหลดข้อมูลสินค้าได้ กรุณาลองใหม่ภายหลัง');
+        }
+      }
     } finally {
       setLoading(false);
+      setSearchLoading(false);
     }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const response = await api.get('/categories');
+      setCategories(response.data || []);
+    } catch (err) {
+      console.error('Error fetching categories:', err);
+    }
+  };
+
+  const fetchProductDetails = async (productId: number) => {
+    try {
+      setDetailLoading(true);
+      const response = await api.get(`/products/${productId}`);
+      setSelectedProduct(response.data);
+    } catch (err: any) {
+      console.error('Error fetching product details:', err);
+      alert('ไม่สามารถโหลดรายละเอียดสินค้าได้: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // ส่ง parameter การค้นหาไปกับ endpoint หลัก
+    await fetchProducts({ 
+      q: searchQuery.trim(), 
+      category: selectedCategory 
+    });
+  };
+
+  const handleResetSearch = () => {
+    setSearchQuery('');
+    setSelectedCategory('all');
+    // โหลดใหม่โดยไม่ส่ง parameter
+    fetchProducts();
   };
 
   const addStock = async (productId: number, quantity: number) => {
     try {
-      await axios.post(`/products/${productId}/add-stock`, {
+      await api.post(`/products/${productId}/add-stock`, {
         quantity,
         notes: `เพิ่มสต็อกโดยผู้ดูแล: ${quantity} ชิ้น`
       });
       await fetchProducts();
       alert(`เพิ่มสต็อกสินค้าเรียบร้อยแล้ว ${quantity} ชิ้น`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error adding stock:', error);
-      alert('เกิดข้อผิดพลาดในการเพิ่มสต็อก');
+      alert('เกิดข้อผิดพลาดในการเพิ่มสต็อก: ' + (error.response?.data?.error || error.message));
     }
   };
 
   const stockOut = async (productId: number, quantity: number) => {
     try {
-      await axios.post(`/products/${productId}/stock-out`, {
+      await api.post(`/products/${productId}/stock-out`, {
         quantity,
         notes: `จ่ายออกโดยผู้ดูแล: ${quantity} ชิ้น`
       });
@@ -58,9 +156,147 @@ export default function ProductsPage() {
       if (error.response?.data?.error === 'สต็อกไม่เพียงพอ') {
         alert(`สต็อกไม่เพียงพอ! สต็อกปัจจุบัน: ${error.response.data.currentStock} ชิ้น`);
       } else {
-        alert('เกิดข้อผิดพลาดในการจ่ายออกสินค้า');
+        alert('เกิดข้อผิดพลาดในการจ่ายออกสินค้า: ' + (error.response?.data?.error || error.message));
       }
     }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormLoading(true);
+
+    try {
+      const productData = {
+        productName: formData.productName.trim(),
+        description: formData.description.trim(),
+        categoryId: parseInt(formData.categoryId),
+        price: parseFloat(formData.price),
+        stockQuantity: parseInt(formData.stockQuantity),
+        reorderLevel: parseInt(formData.reorderLevel)
+      };
+
+      // Validate required fields
+      if (!productData.productName || !productData.categoryId || isNaN(productData.price)) {
+        alert('กรุณากรอกข้อมูลให้ครบถ้วน (ชื่อสินค้า, หมวดหมู่, ราคา)');
+        setFormLoading(false);
+        return;
+      }
+
+      if (productData.price < 0) {
+        alert('ราคาต้องไม่ต่ำกว่า 0');
+        setFormLoading(false);
+        return;
+      }
+
+      const response = await api.post('/products', productData);
+
+      if (response.status === 201) {
+        alert(response.data.message);
+        setShowAddForm(false);
+        resetForm();
+        await fetchProducts();
+      }
+    } catch (error: any) {
+      console.error('Error adding product:', error);
+      alert(error.response?.data?.error || 'เกิดข้อผิดพลาดในการเพิ่มสินค้า');
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+
+    setFormLoading(true);
+
+    try {
+      const productData = {
+        productName: formData.productName.trim(),
+        description: formData.description.trim(),
+        categoryId: parseInt(formData.categoryId),
+        price: parseFloat(formData.price),
+        reorderLevel: parseInt(formData.reorderLevel),
+        isActive: true
+      };
+
+      // Validate required fields
+      if (!productData.productName || !productData.categoryId || isNaN(productData.price)) {
+        alert('กรุณากรอกข้อมูลให้ครบถ้วน (ชื่อสินค้า, หมวดหมู่, ราคา)');
+        setFormLoading(false);
+        return;
+      }
+
+      if (productData.price < 0) {
+        alert('ราคาต้องไม่ต่ำกว่า 0');
+        setFormLoading(false);
+        return;
+      }
+
+      const response = await api.put(`/products/${editingProduct.ProductID}`, productData);
+
+      if (response.status === 200) {
+        alert(response.data.message);
+        setShowEditForm(false);
+        setEditingProduct(null);
+        resetForm();
+        await fetchProducts();
+      }
+    } catch (error: any) {
+      console.error('Error updating product:', error);
+      alert(error.response?.data?.error || 'เกิดข้อผิดพลาดในการแก้ไขสินค้า');
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      productName: '',
+      description: '',
+      categoryId: '',
+      price: '',
+      stockQuantity: '0',
+      reorderLevel: '0'
+    });
+  };
+
+  const openEditForm = (product: Product) => {
+    setEditingProduct(product);
+    setFormData({
+      productName: product.ProductName,
+      description: product.Description || '',
+      categoryId: product.CategoryID.toString(),
+      price: product.Price.toString(),
+      stockQuantity: product.StockQuantity.toString(),
+      reorderLevel: product.ReorderLevel.toString()
+    });
+    setShowEditForm(true);
+  };
+
+  const closeEditForm = () => {
+    setShowEditForm(false);
+    setEditingProduct(null);
+    resetForm();
+  };
+
+  const openDetailModal = async (product: Product) => {
+    setSelectedProduct(product as ProductDetails);
+    setShowDetailModal(true);
+    await fetchProductDetails(product.ProductID);
+  };
+
+  const closeDetailModal = () => {
+    setShowDetailModal(false);
+    setSelectedProduct(null);
   };
 
   if (loading) {
@@ -91,7 +327,7 @@ export default function ProductsPage() {
             <div className="alert alert-error">
               <span className="alert-icon">⚠️</span>
               <span className="alert-message">{error}</span>
-              <button onClick={fetchProducts} className="btn btn-sm btn-retry">ลองอีกครั้ง</button>
+              <button onClick={() => fetchProducts()} className="btn btn-sm btn-retry">ลองอีกครั้ง</button>
             </div>
           )}
 
@@ -140,17 +376,249 @@ export default function ProductsPage() {
             </div>
           </div>
 
+          {/* Search and Filter Bar */}
+          <div className="search-filter-bar">
+            <form onSubmit={handleSearch} className="search-filter-content">
+              <div className="search-group">
+                <label htmlFor="search" className="search-label">
+                  ค้นหาสินค้า
+                </label>
+                <input
+                  type="text"
+                  id="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="search-input"
+                  placeholder="ค้นหาด้วยชื่อสินค้า, คำอธิบาย, หรือราคา..."
+                />
+                <div className="search-tips">
+                  <small>ตัวอย่าง: "airpod", "1500", "เครื่องเสียง"</small>
+                </div>
+              </div>
+              
+              <div className="filter-group">
+                <label htmlFor="category" className="search-label">
+                  หมวดหมู่
+                </label>
+                <select
+                  id="category"
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="form-select"
+                >
+                  <option value="all">ทั้งหมด</option>
+                  {categories.map(category => (
+                    <option key={category.CategoryID} value={category.CategoryID}>
+                      {category.CategoryName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="action-buttons">
+                <button 
+                  type="submit" 
+                  className="btn btn-primary"
+                  disabled={searchLoading}
+                >
+                  {searchLoading ? (
+                    <>
+                      <span className="loading-spinner-small"></span>
+                      <span>กำลังค้นหา...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="btn-icon">🔍</span>
+                      <span>ค้นหา</span>
+                    </>
+                  )}
+                </button>
+                <button 
+                  type="button" 
+                  onClick={handleResetSearch}
+                  className="btn btn-secondary"
+                >
+                  <span className="btn-icon">🔄</span>
+                  <span>รีเซ็ต</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div className="action-bar">
+            <div className="action-buttons">
+              <button
+                onClick={() => setShowAddForm(!showAddForm)}
+                className="btn btn-primary"
+              >
+                <span className="btn-icon">➕</span>
+                <span>{showAddForm ? 'ยกเลิก' : 'เพิ่มสินค้าใหม่'}</span>
+              </button>
+              <button 
+                onClick={() => fetchProducts()} 
+                className="btn btn-secondary"
+              >
+                <span className="btn-icon">🔄</span>
+                <span>รีเฟรช</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Add Product Form */}
+          {showAddForm && (
+            <div className="add-product-form">
+              <div className="card">
+                <div className="card-header">
+                  <div className="card-title">
+                    <h2>📝 เพิ่มสินค้าใหม่</h2>
+                    <p className="card-subtitle">กรอกข้อมูลสินค้าที่ต้องการเพิ่มลงในระบบ</p>
+                  </div>
+                </div>
+                <div className="form-container">
+                  <form onSubmit={handleSubmit} className="product-form">
+                    <div className="form-section">
+                      <h3 className="section-title">ข้อมูลพื้นฐาน</h3>
+                      <div className="form-group">
+                        <label htmlFor="productName" className="form-label">
+                          ชื่อสินค้า *
+                        </label>
+                        <input
+                          type="text"
+                          id="productName"
+                          name="productName"
+                          value={formData.productName}
+                          onChange={handleInputChange}
+                          className="form-input"
+                          placeholder="กรอกชื่อสินค้า..."
+                          required
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label htmlFor="description" className="form-label">
+                          คำอธิบาย
+                        </label>
+                        <textarea
+                          id="description"
+                          name="description"
+                          value={formData.description}
+                          onChange={handleInputChange}
+                          className="form-textarea"
+                          placeholder="กรอกคำอธิบายสินค้า..."
+                          rows={3}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="form-section">
+                      <h3 className="section-title">รายละเอียดสินค้า</h3>
+                      <div className="form-row">
+                        <div className="form-group">
+                          <label htmlFor="categoryId" className="form-label">
+                            หมวดหมู่ *
+                          </label>
+                          <select
+                            id="categoryId"
+                            name="categoryId"
+                            value={formData.categoryId}
+                            onChange={handleInputChange}
+                            className="form-select"
+                            required
+                          >
+                            <option value="">เลือกหมวดหมู่</option>
+                            {categories.map(category => (
+                              <option key={category.CategoryID} value={category.CategoryID}>
+                                {category.CategoryName}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label htmlFor="price" className="form-label">
+                            ราคา (บาท) *
+                          </label>
+                          <input
+                            type="number"
+                            id="price"
+                            name="price"
+                            value={formData.price}
+                            onChange={handleInputChange}
+                            className="form-input"
+                            placeholder="0.00"
+                            step="0.01"
+                            min="0"
+                            required
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="form-section">
+                      <h3 className="section-title">การจัดการสต็อก</h3>
+                      <div className="form-row">
+                        <div className="form-group">
+                          <label htmlFor="stockQuantity" className="form-label">
+                            จำนวนสต็อกเริ่มต้น
+                          </label>
+                          <input
+                            type="number"
+                            id="stockQuantity"
+                            name="stockQuantity"
+                            value={formData.stockQuantity}
+                            onChange={handleInputChange}
+                            className="form-input"
+                            placeholder="0"
+                            min="0"
+                          />
+                          <p className="form-help">จำนวนสินค้าในสต็อกเริ่มต้น</p>
+                        </div>
+                        <div className="form-group">
+                          <label htmlFor="reorderLevel" className="form-label">
+                            ระดับแจ้งเตือน *
+                          </label>
+                          <input
+                            type="number"
+                            id="reorderLevel"
+                            name="reorderLevel"
+                            value={formData.reorderLevel}
+                            onChange={handleInputChange}
+                            className="form-input"
+                            placeholder="0"
+                            min="0"
+                            required
+                          />
+                          <p className="form-help">ระบบจะแจ้งเตือนเมื่อสต็อกต่ำกว่าระดับนี้</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="form-actions">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddForm(false)}
+                        className="btn btn-secondary"
+                      >
+                        ยกเลิก
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={formLoading}
+                        className="btn btn-success"
+                      >
+                        {formLoading ? 'กำลังบันทึก...' : 'บันทึกสินค้า'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Products Table */}
           <div className="card">
             <div className="card-header">
               <div className="card-title">
-                <h2>รายการสินค้าทั้งหมด</h2>
-                <p className="card-subtitle">จัดการเพิ่ม-ลดสต็อกสินค้า</p>
-              </div>
-              <div className="header-actions">
-                <button onClick={fetchProducts} className="btn btn-primary">
-                  <span className="btn-icon">🔄</span>
-                  <span>รีเฟรช</span>
-                </button>
+                <h2>📦 รายการสินค้าทั้งหมด</h2>
+                <p className="card-subtitle">จัดการข้อมูลสินค้าและสต็อกในระบบ</p>
               </div>
             </div>
 
@@ -161,701 +629,420 @@ export default function ProductsPage() {
                     <th>สินค้า</th>
                     <th>หมวดหมู่</th>
                     <th className="text-center">ราคา</th>
-                    <th className="text-center">สต็อก</th>
-                    <th className="text-center">ระดับสั่งซื้อ</th>
+                    <th className="text-center">สต็อกปัจจุบัน</th>
+                    <th className="text-center">แจ้งเตือนต่ำกว่า</th>
                     <th className="text-center">สถานะ</th>
                     <th className="text-center">การจัดการ</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {products.map((product) => (
-                    <tr key={product.ProductID} className="table-row-hover">
-                      <td>
-                        <div className="product-info">
-                          <div className="product-icon">📦</div>
-                          <div className="product-details">
-                            <div className="product-name">{product.ProductName}</div>
-                            <div className="product-description">{product.Description}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        <span className="category-badge">{product.CategoryName}</span>
-                      </td>
-                      <td className="text-center">
-                        <span className="price-tag">฿{product.Price.toLocaleString()}</span>
-                      </td>
-                      <td className="text-center">
-                        <span className={`stock-badge ${
-                          product.StockQuantity === 0 ? 'stock-zero' :
-                          product.StockQuantity <= product.ReorderLevel ? 'stock-low' : 'stock-normal'
-                        }`}>
-                          {product.StockQuantity.toLocaleString()}
-                        </span>
-                      </td>
-                      <td className="text-center">
-                        <span className="reorder-badge">{product.ReorderLevel}</span>
-                      </td>
-                      <td className="text-center">
-                        <span className={`status-badge ${
-                          product.StockQuantity === 0 ? 'out-of-stock' :
-                          product.StockQuantity <= product.ReorderLevel ? 'low-stock' : 'in-stock'
-                        }`}>
-                          {product.StockQuantity === 0 ? '🔴 หมด' :
-                           product.StockQuantity <= product.ReorderLevel ? '🟡 ใกล้หมด' : '🟢 ปกติ'}
-                        </span>
-                      </td>
-                      <td>
-                        <div className="action-buttons">
-                          <div className="action-group">
-                            <div className="action-label">เพิ่มสต็อก</div>
-                            <div className="button-group">
-                              <button
-                                onClick={() => addStock(product.ProductID, 10)}
-                                className="btn btn-xs btn-success"
-                              >
-                                <span className="btn-icon-sm">+</span>
-                                <span>10</span>
-                              </button>
-                              <button
-                                onClick={() => addStock(product.ProductID, 50)}
-                                className="btn btn-xs btn-success"
-                              >
-                                <span className="btn-icon-sm">+</span>
-                                <span>50</span>
-                              </button>
-                            </div>
-                          </div>
-                          <div className="action-group">
-                            <div className="action-label">จ่ายออก</div>
-                            <div className="button-group">
-                              <button
-                                onClick={() => stockOut(product.ProductID, 5)}
-                                className="btn btn-xs btn-warning"
-                                disabled={product.StockQuantity < 5}
-                              >
-                                <span className="btn-icon-sm">-</span>
-                                <span>5</span>
-                              </button>
-                              <button
-                                onClick={() => stockOut(product.ProductID, 10)}
-                                className="btn btn-xs btn-warning"
-                                disabled={product.StockQuantity < 10}
-                              >
-                                <span className="btn-icon-sm">-</span>
-                                <span>10</span>
-                              </button>
-                            </div>
-                          </div>
+                  {products.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-center">
+                        <div className="empty-state">
+                          <div className="empty-icon">📦</div>
+                          <p className="empty-text">ไม่พบข้อมูลสินค้า</p>
+                          <p className="empty-subtext">
+                            {searchQuery || selectedCategory !== 'all' 
+                              ? 'ลองเปลี่ยนเงื่อนไขการค้นหาหรือรีเซ็ตการค้นหา' 
+                              : 'เริ่มต้นโดยการเพิ่มสินค้าใหม่'}
+                          </p>
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    products.map((product) => (
+                      <tr key={product.ProductID} className="table-row-hover">
+                        <td>
+                          <div className="product-info">
+                            <div className="product-icon">📦</div>
+                            <div className="product-details">
+                              <div className="product-name">{product.ProductName}</div>
+                              {product.Description && (
+                                <div className="product-description">
+                                  {product.Description}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <span className="category-badge">
+                            {product.CategoryName}
+                          </span>
+                        </td>
+                        <td className="text-center">
+                          <span className="price-tag">
+                            ฿{product.Price.toLocaleString()}
+                          </span>
+                        </td>
+                        <td className="text-center">
+                          <div className="stock-info">
+                            <span className={`stock-badge ${
+                              product.StockQuantity === 0 ? 'stock-zero' :
+                              product.StockQuantity <= product.ReorderLevel ? 'stock-low' : 'stock-normal'
+                            }`}>
+                              {product.StockQuantity.toLocaleString()} ชิ้น
+                            </span>
+                          </div>
+                        </td>
+                        <td className="text-center">
+                          <div className="reorder-info">
+                            <span className={`reorder-level ${
+                              product.StockQuantity <= product.ReorderLevel ? 'reorder-alert' : 'reorder-normal'
+                            }`}>
+                              {product.StockQuantity <= product.ReorderLevel ? '⚠️ ' : ''}
+                              {product.ReorderLevel} ชิ้น
+                            </span>
+                            {product.StockQuantity <= product.ReorderLevel && (
+                              <div className="alert-message">
+                                ⚠️ สต็อกใกล้ถึงระดับแจ้งเตือน
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="text-center">
+                          <span className={`status-badge ${
+                            product.StockQuantity === 0 ? 'out-of-stock' :
+                            product.StockQuantity <= product.ReorderLevel ? 'low-stock' : 'in-stock'
+                          }`}>
+                            {product.StockQuantity === 0 ? '🔴 หมด' :
+                             product.StockQuantity <= product.ReorderLevel ? '🟡 ใกล้หมด' : '🟢 ปกติ'}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="action-buttons">
+                            <div className="action-group">
+                              <div className="action-label">จัดการสต็อก</div>
+                              <div className="button-group">
+                                <button
+                                  onClick={() => addStock(product.ProductID, 1)}
+                                  className="btn btn-success btn-xs"
+                                  title="เพิ่มสต็อก 1 ชิ้น"
+                                >
+                                  <span className="btn-icon-sm">+1</span>
+                                </button>
+                                <button
+                                  onClick={() => addStock(product.ProductID, 5)}
+                                  className="btn btn-success btn-xs"
+                                  title="เพิ่มสต็อก 5 ชิ้น"
+                                >
+                                  <span className="btn-icon-sm">+5</span>
+                                </button>
+                                <button
+                                  onClick={() => stockOut(product.ProductID, 1)}
+                                  className="btn btn-warning btn-xs"
+                                  disabled={product.StockQuantity < 1}
+                                  title="จ่ายออก 1 ชิ้น"
+                                >
+                                  <span className="btn-icon-sm">-1</span>
+                                </button>
+                              </div>
+                            </div>
+                            <div className="action-group">
+                              <div className="action-label">จัดการข้อมูล</div>
+                              <div className="button-group">
+                                <button
+                                  onClick={() => openEditForm(product)}
+                                  className="btn btn-info btn-xs"
+                                >
+                                  <span className="btn-icon">✏️</span>
+                                  <span>แก้ไข</span>
+                                </button>
+                                <button
+                                  onClick={() => openDetailModal(product)}
+                                  className="btn btn-primary btn-xs"
+                                >
+                                  <span className="btn-icon">👁️</span>
+                                  <span>รายละเอียด</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
-
-            {products.length === 0 && !loading && (
-              <div className="empty-state">
-                <div className="empty-icon">📦</div>
-                <p className="empty-text">ไม่พบข้อมูลสินค้า</p>
-                <p className="empty-subtext">กรุณาตรวจสอบการเชื่อมต่อฐานข้อมูล</p>
-              </div>
-            )}
           </div>
         </div>
       </main>
 
-      <style jsx>{`
-        .app-container {
-          min-height: 100vh;
-          background: linear-gradient(135deg, #fef3f0 0%, #f0f9ff 50%, #faf5ff 100%);
-        }
-
-        .loading-container {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          min-height: 60vh;
-        }
-
-        .loading-spinner {
-          width: 50px;
-          height: 50px;
-          border: 4px solid #f3e8ff;
-          border-top: 4px solid #a78bfa;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-
-        .loading-text {
-          margin-top: 16px;
-          color: #6b7280;
-          font-size: 16px;
-        }
-
-        .container {
-          max-width: 1400px;
-          margin: 0 auto;
-          padding: 32px 20px;
-        }
-
-        .page-header {
-          text-align: center;
-          margin-bottom: 32px;
-          animation: fadeInDown 0.5s ease;
-        }
-
-        @keyframes fadeInDown {
-          from {
-            opacity: 0;
-            transform: translateY(-20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        .header-icon {
-          font-size: 56px;
-          margin-bottom: 12px;
-          filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
-        }
-
-        .page-header h1 {
-          font-size: 36px;
-          font-weight: 700;
-          background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          margin: 0 0 8px 0;
-        }
-
-        .page-header p {
-          color: #6b7280;
-          font-size: 16px;
-          margin: 0;
-        }
-
-        .alert-error {
-          background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-          border: 2px solid #fca5a5;
-          border-radius: 16px;
-          padding: 16px 20px;
-          margin-bottom: 24px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          box-shadow: 0 4px 12px rgba(239, 68, 68, 0.15);
-        }
-
-        .alert-icon {
-          font-size: 24px;
-        }
-
-        .alert-message {
-          flex: 1;
-          color: #991b1b;
-          font-weight: 500;
-        }
-
-        .stats-summary {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-          gap: 20px;
-          margin-bottom: 32px;
-          animation: fadeInUp 0.5s ease;
-        }
-
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        .stat-box {
-          background: white;
-          border-radius: 16px;
-          padding: 24px;
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-          border: 2px solid;
-          transition: all 0.3s ease;
-        }
-
-        .stat-box:hover {
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-        }
-
-        .stat-box.stat-total {
-          background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-          border-color: #93c5fd;
-        }
-
-        .stat-box.stat-instock {
-          background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
-          border-color: #6ee7b7;
-        }
-
-        .stat-box.stat-lowstock {
-          background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-          border-color: #fbbf24;
-        }
-
-        .stat-box.stat-outstock {
-          background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-          border-color: #f87171;
-        }
-
-        .stat-icon-wrapper {
-          width: 60px;
-          height: 60px;
-          background: white;
-          border-radius: 14px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-        }
-
-        .stat-icon {
-          font-size: 30px;
-        }
-
-        .stat-content {
-          flex: 1;
-        }
-
-        .stat-label {
-          font-size: 13px;
-          font-weight: 600;
-          color: #4b5563;
-          margin-bottom: 4px;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-
-        .stat-value {
-          font-size: 32px;
-          font-weight: 800;
-          color: #111827;
-          line-height: 1;
-        }
-
-        .card {
-          background: white;
-          border-radius: 20px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-          border: 2px solid #e5e7eb;
-          margin-bottom: 32px;
-          overflow: hidden;
-        }
-
-        .card-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 28px 32px;
-          background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
-          border-bottom: 2px solid #e9d5ff;
-        }
-
-        .card-title h2 {
-          margin: 0 0 4px 0;
-          color: #581c87;
-          font-size: 24px;
-          font-weight: 700;
-        }
-
-        .card-subtitle {
-          margin: 0;
-          font-size: 14px;
-          color: #7c3aed;
-          font-weight: 500;
-        }
-
-        .header-actions {
-          display: flex;
-          gap: 12px;
-        }
-
-        .btn {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          border: none;
-          border-radius: 10px;
-          padding: 10px 20px;
-          font-weight: 600;
-          font-size: 14px;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-        }
-
-        .btn:disabled {
-          opacity: 0.4;
-          cursor: not-allowed;
-          box-shadow: none;
-        }
-
-        .btn:hover:not(:disabled) {
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        }
-
-        .btn-primary {
-          background: linear-gradient(135deg, #a78bfa 0%, #818cf8 100%);
-          color: white;
-        }
-
-        .btn-success {
-          background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
-          color: white;
-        }
-
-        .btn-warning {
-          background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
-          color: white;
-        }
-
-        .btn-retry {
-          background: #fee2e2;
-          color: #991b1b;
-        }
-
-        .btn-retry:hover:not(:disabled) {
-          background: #fecaca;
-        }
-
-        .btn-sm {
-          padding: 8px 16px;
-          font-size: 13px;
-        }
-
-        .btn-xs {
-          padding: 6px 12px;
-          font-size: 12px;
-          font-weight: 700;
-        }
-
-        .btn-icon {
-          font-size: 16px;
-        }
-
-        .btn-icon-sm {
-          font-size: 14px;
-          font-weight: 800;
-        }
-
-        .table-container {
-          overflow-x: auto;
-          padding: 0;
-        }
-
-        .table {
-          width: 100%;
-          border-collapse: separate;
-          border-spacing: 0;
-        }
-
-        .table thead tr {
-          background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-        }
-
-        .table th {
-          padding: 16px 20px;
-          text-align: left;
-          color: #0c4a6e;
-          font-weight: 700;
-          font-size: 14px;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          border-bottom: 2px solid #bae6fd;
-          white-space: nowrap;
-        }
-
-        .table td {
-          padding: 20px;
-          color: #374151;
-          font-size: 14px;
-          border-bottom: 1px solid #f3f4f6;
-        }
-
-        .table-row-hover {
-          transition: all 0.2s ease;
-        }
-
-        .table-row-hover:hover {
-          background: linear-gradient(135deg, #fef3f0 0%, #faf5ff 100%);
-        }
-
-        .text-center {
-          text-align: center;
-        }
-
-        .product-info {
-          display: flex;
-          align-items: center;
-          gap: 14px;
-        }
-
-        .product-icon {
-          font-size: 28px;
-          flex-shrink: 0;
-        }
-
-        .product-details {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .product-name {
-          font-weight: 700;
-          color: #111827;
-          font-size: 15px;
-        }
-
-        .product-description {
-          color: #6b7280;
-          font-size: 13px;
-          max-width: 300px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          line-height: 1.4;
-        }
-
-        .category-badge {
-          display: inline-block;
-          background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-          color: #1e40af;
-          padding: 6px 14px;
-          border-radius: 12px;
-          font-size: 13px;
-          font-weight: 600;
-          border: 1px solid #93c5fd;
-        }
-
-        .price-tag {
-          font-weight: 700;
-          color: #7c3aed;
-          padding: 6px 14px;
-          background: #f3e8ff;
-          border-radius: 10px;
-          display: inline-block;
-          border: 1px solid #e9d5ff;
-        }
-
-        .stock-badge {
-          font-weight: 700;
-          padding: 6px 14px;
-          border-radius: 10px;
-          display: inline-block;
-          border: 2px solid;
-        }
-
-        .stock-badge.stock-normal {
-          background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
-          color: #065f46;
-          border-color: #6ee7b7;
-        }
-
-        .stock-badge.stock-low {
-          background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-          color: #92400e;
-          border-color: #fbbf24;
-        }
-
-        .stock-badge.stock-zero {
-          background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-          color: #991b1b;
-          border-color: #f87171;
-        }
-
-        .reorder-badge {
-          font-weight: 600;
-          color: #d97706;
-          padding: 6px 14px;
-          background: #fef3c7;
-          border-radius: 10px;
-          display: inline-block;
-          border: 1px solid #fde68a;
-        }
-
-        .status-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          padding: 6px 14px;
-          border-radius: 12px;
-          font-size: 13px;
-          font-weight: 700;
-          border: 2px solid;
-        }
-
-        .status-badge.in-stock {
-          background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
-          color: #065f46;
-          border-color: #6ee7b7;
-        }
-
-        .status-badge.low-stock {
-          background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-          color: #92400e;
-          border-color: #fbbf24;
-        }
-
-        .status-badge.out-of-stock {
-          background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-          color: #991b1b;
-          border-color: #f87171;
-        }
-
-        .action-buttons {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          min-width: 200px;
-        }
-
-        .action-group {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-
-        .action-label {
-          font-size: 11px;
-          font-weight: 700;
-          color: #6b7280;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-
-        .button-group {
-          display: flex;
-          gap: 6px;
-        }
-
-        .button-group .btn {
-          flex: 1;
-        }
-
-        .empty-state {
-          text-align: center;
-          padding: 60px 20px;
-        }
-
-        .empty-icon {
-          font-size: 64px;
-          margin-bottom: 16px;
-          opacity: 0.6;
-        }
-
-        .empty-text {
-          font-size: 18px;
-          font-weight: 600;
-          color: #4b5563;
-          margin: 0 0 8px 0;
-        }
-
-        .empty-subtext {
-          font-size: 14px;
-          color: #9ca3af;
-          margin: 0;
-        }
-
-        @media (max-width: 1024px) {
-          .stats-summary {
-            grid-template-columns: repeat(2, 1fr);
-          }
-        }
-
-        @media (max-width: 768px) {
-          .container {
-            padding: 20px 16px;
-          }
-
-          .page-header h1 {
-            font-size: 28px;
-          }
-
-          .header-icon {
-            font-size: 48px;
-          }
-
-          .stats-summary {
-            grid-template-columns: 1fr;
-          }
-
-          .stat-box {
-            padding: 20px;
-          }
-
-          .card-header {
-            flex-direction: column;
-            gap: 16px;
-            align-items: flex-start;
-            padding: 20px;
-          }
-
-          .btn {
-            width: 100%;
-          }
-
-          .table-container {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-          }
-
-          .table {
-            min-width: 900px;
-          }
-
-          .table th,
-          .table td {
-            padding: 12px 16px;
-            font-size: 13px;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .page-header h1 {
-            font-size: 24px;
-          }
-
-          .stat-value {
-            font-size: 26px;
-          }
-
-          .card-title h2 {
-            font-size: 20px;
-          }
-
-          .action-buttons {
-            min-width: 180px;
-          }
-        }
-      `}</style>
+      {/* Edit Product Modal */}
+      {showEditForm && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3 className="modal-title">✏️ แก้ไขสินค้า</h3>
+              <button onClick={closeEditForm} className="modal-close">
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <form onSubmit={handleEditSubmit} className="product-form">
+                <div className="form-section">
+                  <h3 className="section-title">ข้อมูลพื้นฐาน</h3>
+                  <div className="form-group">
+                    <label htmlFor="edit-productName" className="form-label">
+                      ชื่อสินค้า *
+                    </label>
+                    <input
+                      type="text"
+                      id="edit-productName"
+                      name="productName"
+                      value={formData.productName}
+                      onChange={handleInputChange}
+                      className="form-input"
+                      placeholder="กรอกชื่อสินค้า..."
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="edit-description" className="form-label">
+                      คำอธิบาย
+                    </label>
+                    <textarea
+                      id="edit-description"
+                      name="description"
+                      value={formData.description}
+                      onChange={handleInputChange}
+                      className="form-textarea"
+                      placeholder="กรอกคำอธิบายสินค้า..."
+                      rows={3}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-section">
+                  <h3 className="section-title">รายละเอียดสินค้า</h3>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label htmlFor="edit-categoryId" className="form-label">
+                        หมวดหมู่ *
+                      </label>
+                      <select
+                        id="edit-categoryId"
+                        name="categoryId"
+                        value={formData.categoryId}
+                        onChange={handleInputChange}
+                        className="form-select"
+                        required
+                      >
+                        <option value="">เลือกหมวดหมู่</option>
+                        {categories.map(category => (
+                          <option key={category.CategoryID} value={category.CategoryID}>
+                            {category.CategoryName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="edit-price" className="form-label">
+                        ราคา (บาท) *
+                      </label>
+                      <input
+                        type="number"
+                        id="edit-price"
+                        name="price"
+                        value={formData.price}
+                        onChange={handleInputChange}
+                        className="form-input"
+                        placeholder="0.00"
+                        step="0.01"
+                        min="0"
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-section">
+                  <h3 className="section-title">การจัดการสต็อก</h3>
+                  <div className="form-group">
+                    <label htmlFor="edit-reorderLevel" className="form-label">
+                      ระดับแจ้งเตือน *
+                    </label>
+                    <input
+                      type="number"
+                      id="edit-reorderLevel"
+                      name="reorderLevel"
+                      value={formData.reorderLevel}
+                      onChange={handleInputChange}
+                      className="form-input"
+                      placeholder="0"
+                      min="0"
+                      required
+                    />
+                    <p className="form-help">ระบบจะแจ้งเตือนเมื่อสต็อกต่ำกว่าระดับนี้</p>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">
+                      สต็อกปัจจุบัน
+                    </label>
+                    <input
+                      type="text"
+                      value={`${editingProduct?.StockQuantity || 0} ชิ้น`}
+                      className="form-input"
+                      disabled
+                    />
+                    <p className="form-help">
+                      ใช้ปุ่มจัดการสต็อกในตารางเพื่อเพิ่ม/ลดสต็อก
+                    </p>
+                  </div>
+                </div>
+
+                <div className="form-actions">
+                  <button
+                    type="button"
+                    onClick={closeEditForm}
+                    className="btn btn-secondary"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={formLoading}
+                    className="btn btn-success"
+                  >
+                    {formLoading ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Product Detail Modal */}
+      {showDetailModal && selectedProduct && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3 className="modal-title">📋 รายละเอียดสินค้า</h3>
+              <button onClick={closeDetailModal} className="modal-close">
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              {detailLoading ? (
+                <div className="loading-container">
+                  <div className="loading-spinner"></div>
+                  <p className="loading-text">กำลังโหลดรายละเอียด...</p>
+                </div>
+              ) : (
+                <div className="product-detail-content">
+                  <div className="detail-section">
+                    <div className="detail-header">
+                      <div className="product-icon-large">📦</div>
+                      <div className="product-title">
+                        <h4>{selectedProduct.ProductName}</h4>
+                        <span className="category-badge-large">
+                          {selectedProduct.CategoryName}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {selectedProduct.Description && (
+                      <div className="detail-group">
+                        <label>คำอธิบาย:</label>
+                        <p className="detail-description">{selectedProduct.Description}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="detail-grid">
+                    <div className="detail-card">
+                      <div className="detail-card-icon">💰</div>
+                      <div className="detail-card-content">
+                        <div className="detail-card-label">ราคา</div>
+                        <div className="detail-card-value">
+                          ฿{selectedProduct.Price.toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="detail-card">
+                      <div className="detail-card-icon">📊</div>
+                      <div className="detail-card-content">
+                        <div className="detail-card-label">สต็อกปัจจุบัน</div>
+                        <div className="detail-card-value">
+                          {selectedProduct.StockQuantity.toLocaleString()} ชิ้น
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="detail-card">
+                      <div className="detail-card-icon">⚠️</div>
+                      <div className="detail-card-content">
+                        <div className="detail-card-label">ระดับแจ้งเตือน</div>
+                        <div className="detail-card-value">
+                          {selectedProduct.ReorderLevel} ชิ้น
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="detail-card">
+                      <div className="detail-card-icon">📅</div>
+                      <div className="detail-card-content">
+                        <div className="detail-card-label">วันที่เพิ่ม</div>
+                        <div className="detail-card-value">
+                          {new Date(selectedProduct.CreatedDate).toLocaleDateString('th-TH')}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="detail-section">
+                    <h4 className="section-title">สถานะสินค้า</h4>
+                    <div className={`status-indicator ${
+                      selectedProduct.StockQuantity === 0 ? 'status-out' :
+                      selectedProduct.StockQuantity <= selectedProduct.ReorderLevel ? 'status-low' : 'status-normal'
+                    }`}>
+                      {selectedProduct.StockQuantity === 0 ? (
+                        <>
+                          <span className="status-icon">🔴</span>
+                          <span className="status-text">หมดสต็อก</span>
+                        </>
+                      ) : selectedProduct.StockQuantity <= selectedProduct.ReorderLevel ? (
+                        <>
+                          <span className="status-icon">🟡</span>
+                          <span className="status-text">สต็อกใกล้หมด</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="status-icon">🟢</span>
+                          <span className="status-text">สต็อกปกติ</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="form-actions">
+                    <button
+                      onClick={() => {
+                        closeDetailModal();
+                        openEditForm(selectedProduct);
+                      }}
+                      className="btn btn-info"
+                    >
+                      <span className="btn-icon">✏️</span>
+                      <span>แก้ไขสินค้า</span>
+                    </button>
+                    <button
+                      onClick={closeDetailModal}
+                      className="btn btn-secondary"
+                    >
+                      ปิด
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
